@@ -16,6 +16,67 @@ const DB_NAME = process.env.DB_NAME || 'flight_booking2';
 
 let connection;
 
+// Check if column exists in table
+const columnExists = async (connection, tableName, columnName) => {
+  try {
+    const [columns] = await connection.execute(
+      `SELECT COLUMN_NAME 
+       FROM information_schema.COLUMNS 
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [DB_NAME, tableName, columnName]
+    );
+    return columns.length > 0;
+  } catch (error) {
+    return false;
+  }
+};
+
+// Add missing columns to existing tables
+const migrateBookingsTable = async (connection) => {
+  try {
+    const hasBookingRef = await columnExists(connection, 'bookings', 'booking_reference');
+    
+    if (!hasBookingRef) {
+      console.log('🔄 Adding booking_reference column to bookings table...');
+      
+      // Add booking_reference column
+      await connection.query(`
+        ALTER TABLE bookings 
+        ADD COLUMN booking_reference VARCHAR(20) NULL AFTER id
+      `);
+      
+      // Generate booking references for existing bookings
+      const [existingBookings] = await connection.query('SELECT id FROM bookings WHERE booking_reference IS NULL');
+      
+      for (const booking of existingBookings) {
+        const prefix = 'BK';
+        const timestamp = Date.now().toString(36).toUpperCase();
+        const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+        const bookingRef = `${prefix}${timestamp}${random}`;
+        
+        await connection.query(
+          'UPDATE bookings SET booking_reference = ? WHERE id = ?',
+          [bookingRef, booking.id]
+        );
+      }
+      
+      // Make it NOT NULL and UNIQUE after populating
+      await connection.query(`
+        ALTER TABLE bookings 
+        MODIFY COLUMN booking_reference VARCHAR(20) NOT NULL,
+        ADD UNIQUE INDEX idx_booking_ref (booking_reference)
+      `);
+      
+      console.log('  ✅ booking_reference column added successfully');
+    } else {
+      console.log('  ℹ️  booking_reference column already exists');
+    }
+  } catch (error) {
+    console.error('  ⚠️  Error migrating bookings table:', error.message);
+    // Don't throw, continue with initialization
+  }
+};
+
 export const initDatabase = async () => {
   try {
     console.log('🔄 Initializing database connection...');
@@ -60,7 +121,7 @@ export const initDatabase = async () => {
         .split(';')
         .map(stmt => stmt.trim())
         .filter(stmt => stmt.length > 0 && !stmt.startsWith('--'));
-      
+
       for (const statement of statements) {
         if (statement.length > 0) {
           try {
@@ -73,7 +134,7 @@ export const initDatabase = async () => {
             }
           } catch (err2) {
             if (!err2.message.includes('already exists') && 
-                !err2.code === 'ER_TABLE_EXISTS_ERROR' &&
+                err2.code !== 'ER_TABLE_EXISTS_ERROR' &&
                 !err2.message.includes('Duplicate')) {
               console.error(`  ❌ Error: ${err2.message}`);
             }
@@ -81,6 +142,10 @@ export const initDatabase = async () => {
         }
       }
     }
+
+    // Run migrations for existing tables
+    console.log('🔄 Running database migrations...');
+    await migrateBookingsTable(connection);
 
     // Verify tables were created
     const [tables] = await connection.query(

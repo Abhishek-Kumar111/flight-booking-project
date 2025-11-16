@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS flights (
 -- Bookings table
 CREATE TABLE IF NOT EXISTS bookings (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  booking_reference VARCHAR(20) NOT NULL UNIQUE,
   flight_id INT NOT NULL,
   passenger_name VARCHAR(100) NOT NULL,
   passenger_email VARCHAR(100) NOT NULL,
@@ -29,7 +30,8 @@ CREATE TABLE IF NOT EXISTS bookings (
   status VARCHAR(20) DEFAULT 'confirmed',
   FOREIGN KEY (flight_id) REFERENCES flights(id) ON DELETE CASCADE,
   INDEX idx_email (passenger_email),
-  INDEX idx_flight (flight_id)
+  INDEX idx_flight (flight_id),
+  INDEX idx_booking_ref (booking_reference)
 );
 
 -- Sample data (only insert if table is empty)

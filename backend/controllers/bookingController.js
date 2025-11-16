@@ -1,5 +1,13 @@
 import pool from '../config/database.js';
 
+// Generate unique booking reference
+const generateBookingReference = () => {
+  const prefix = 'BK';
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${prefix}${timestamp}${random}`;
+};
+
 export const createBooking = async (req, res) => {
   try {
     const { flightId, passengerName, passengerEmail, passengerPhone, seats } = req.body;
@@ -35,11 +43,33 @@ export const createBooking = async (req, res) => {
         });
       }
 
-      // Create booking
+      // Generate unique booking reference
+      let bookingReference;
+      let isUnique = false;
+      let attempts = 0;
+      
+      while (!isUnique && attempts < 10) {
+        bookingReference = generateBookingReference();
+        const [existing] = await connection.execute(
+          'SELECT id FROM bookings WHERE booking_reference = ?',
+          [bookingReference]
+        );
+        if (existing.length === 0) {
+          isUnique = true;
+        }
+        attempts++;
+      }
+
+      if (!isUnique) {
+        await connection.rollback();
+        return res.status(500).json({ error: 'Failed to generate booking reference' });
+      }
+
+      // Create booking with reference
       const [result] = await connection.execute(
-        `INSERT INTO bookings (flight_id, passenger_name, passenger_email, passenger_phone, seats, booking_date, status)
-         VALUES (?, ?, ?, ?, ?, NOW(), 'confirmed')`,
-        [flightId, passengerName, passengerEmail, passengerPhone || null, seats]
+        `INSERT INTO bookings (booking_reference, flight_id, passenger_name, passenger_email, passenger_phone, seats, booking_date, status)
+         VALUES (?, ?, ?, ?, ?, ?, NOW(), 'confirmed')`,
+        [bookingReference, flightId, passengerName, passengerEmail, passengerPhone || null, seats]
       );
 
       // Update available seats
@@ -50,9 +80,13 @@ export const createBooking = async (req, res) => {
 
       await connection.commit();
 
-      // Fetch the created booking
+      // Fetch the created booking with flight details
       const [bookings] = await pool.execute(
-        'SELECT * FROM bookings WHERE id = ?',
+        `SELECT b.*, f.flight_number, f.airline, f.origin, f.destination, 
+                f.departure_time, f.arrival_time, f.price
+         FROM bookings b
+         JOIN flights f ON b.flight_id = f.id
+         WHERE b.id = ?`,
         [result.insertId]
       );
 
@@ -65,25 +99,30 @@ export const createBooking = async (req, res) => {
     }
   } catch (error) {
     console.error('Error creating booking:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 };
 
 export const getBookings = async (req, res) => {
   try {
-    const { email } = req.query;
+    const { email, bookingReference } = req.query;
     
     let query = `
-      SELECT b.*, f.flight_number, f.origin, f.destination, 
+      SELECT b.*, f.flight_number, f.airline, f.origin, f.destination, 
              f.departure_time, f.arrival_time, f.price
       FROM bookings b
       JOIN flights f ON b.flight_id = f.id
+      WHERE 1=1
     `;
     
     const params = [];
     if (email) {
-      query += ' WHERE b.passenger_email = ?';
+      query += ' AND b.passenger_email = ?';
       params.push(email);
+    }
+    if (bookingReference) {
+      query += ' AND b.booking_reference = ?';
+      params.push(bookingReference);
     }
     
     query += ' ORDER BY b.booking_date DESC';
@@ -92,6 +131,30 @@ export const getBookings = async (req, res) => {
     res.json(bookings);
   } catch (error) {
     console.error('Error fetching bookings:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const getBookingByReference = async (req, res) => {
+  try {
+    const { reference } = req.params;
+    
+    const [bookings] = await pool.execute(
+      `SELECT b.*, f.flight_number, f.airline, f.origin, f.destination, 
+              f.departure_time, f.arrival_time, f.price
+       FROM bookings b
+       JOIN flights f ON b.flight_id = f.id
+       WHERE b.booking_reference = ?`,
+      [reference]
+    );
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    res.json(bookings[0]);
+  } catch (error) {
+    console.error('Error fetching booking:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
