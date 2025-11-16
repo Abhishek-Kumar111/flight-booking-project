@@ -158,3 +158,83 @@ export const getBookingByReference = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+export const cancelBooking = async (req, res) => {
+  try {
+    const { reference } = req.params;
+    
+    console.log('Cancel booking called with reference:', reference); // Debug log
+
+    if (!reference) {
+      return res.status(400).json({ error: 'Booking reference is required' });
+    }
+
+    // Start transaction
+    const connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // Get booking details
+      const [bookings] = await connection.execute(
+        `SELECT b.*, f.id as flight_id 
+         FROM bookings b
+         JOIN flights f ON b.flight_id = f.id
+         WHERE b.booking_reference = ? FOR UPDATE`,
+        [reference]
+      );
+
+      if (bookings.length === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+
+      const booking = bookings[0];
+
+      // Check if already cancelled
+      if (booking.status === 'cancelled') {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({ error: 'Booking is already cancelled' });
+      }
+
+      // Update booking status to cancelled
+      await connection.execute(
+        'UPDATE bookings SET status = ? WHERE booking_reference = ?',
+        ['cancelled', reference]
+      );
+
+      // Restore seats to the flight
+      await connection.execute(
+        'UPDATE flights SET available_seats = available_seats + ? WHERE id = ?',
+        [booking.seats, booking.flight_id]
+      );
+
+      await connection.commit();
+
+      // Fetch updated booking with flight details
+      const [updatedBookings] = await pool.execute(
+        `SELECT b.*, f.flight_number, f.airline, f.origin, f.destination, 
+                f.departure_time, f.arrival_time, f.price
+         FROM bookings b
+         JOIN flights f ON b.flight_id = f.id
+         WHERE b.booking_reference = ?`,
+        [reference]
+      );
+
+      connection.release();
+
+      res.json({
+        message: 'Booking cancelled successfully',
+        booking: updatedBookings[0]
+      });
+    } catch (error) {
+      await connection.rollback();
+      connection.release();
+      throw error;
+    }
+  } catch (error) {
+    console.error('Error cancelling booking:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};

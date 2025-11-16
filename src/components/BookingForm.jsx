@@ -12,6 +12,7 @@ const BookingForm = ({ flight, onBookingSuccess, onClose }) => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [bookingDetails, setBookingDetails] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,9 +24,10 @@ const BookingForm = ({ flight, onBookingSuccess, onClose }) => {
         flightId: flight.id,
         ...formData
       });
-      alert(`Booking confirmed! Booking ID: ${response.data.id}`);
+      
+      // Store booking details to show success message
+      setBookingDetails(response.data);
       onBookingSuccess();
-      onClose();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to create booking');
     } finally {
@@ -33,7 +35,140 @@ const BookingForm = ({ flight, onBookingSuccess, onClose }) => {
     }
   };
 
+  const handleBookMore = () => {
+    // Reset form and booking details to allow booking another flight
+    setBookingDetails(null);
+    setFormData({
+      passengerName: '',
+      passengerEmail: '',
+      passengerPhone: '',
+      seats: 1
+    });
+    setError('');
+    // Close the form so user can select another flight
+    onClose();
+  };
+
+  const handleReturnHome = () => {
+    // Reset everything and close the form to return to home
+    setBookingDetails(null);
+    setFormData({
+      passengerName: '',
+      passengerEmail: '',
+      passengerPhone: '',
+      seats: 1
+    });
+    setError('');
+    onClose();
+  };
+
   if (!flight) return null;
+
+  // Show booking confirmation if booking was successful
+  if (bookingDetails) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+        <div className="bg-white rounded-lg shadow-xl p-5 max-w-md w-full relative my-4 max-h-[90vh] overflow-y-auto">
+          {/* Close button in top right */}
+          <button
+            onClick={handleReturnHome}
+            className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 text-xl font-bold transition duration-200 z-10"
+            aria-label="Close"
+          >
+            ×
+          </button>
+
+          <div className="text-center mb-4">
+            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-2">
+              <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-1">Booking Confirmed!</h2>
+            <p className="text-sm text-gray-600">Your flight has been successfully booked</p>
+          </div>
+
+          <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-4">
+            <div className="text-center">
+              <p className="text-xs text-gray-600 mb-1">Booking Reference</p>
+              <p className="text-2xl font-bold text-blue-600 tracking-wider">
+                {bookingDetails.booking_reference}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Save this reference number
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2 mb-4 text-sm">
+            <div className="flex justify-between py-1.5 border-b">
+              <span className="text-gray-600">Passenger:</span>
+              <span className="font-semibold text-right">{bookingDetails.passenger_name}</span>
+            </div>
+            <div className="flex justify-between py-1.5 border-b">
+              <span className="text-gray-600">Flight:</span>
+              <span className="font-semibold text-right">{bookingDetails.flight_number} - {bookingDetails.airline}</span>
+            </div>
+            <div className="flex justify-between py-1.5 border-b">
+              <span className="text-gray-600">Route:</span>
+              <span className="font-semibold text-right">{bookingDetails.origin} → {bookingDetails.destination}</span>
+            </div>
+            <div className="flex justify-between py-1.5 border-b">
+              <span className="text-gray-600">Seats:</span>
+              <span className="font-semibold">{bookingDetails.seats}</span>
+            </div>
+            <div className="flex justify-between py-1.5 border-b">
+              <span className="text-gray-600">Total Amount:</span>
+              <span className="font-semibold text-green-600">
+                ${(parseFloat(bookingDetails.price) * bookingDetails.seats).toFixed(2)}
+              </span>
+            </div>
+            <div className="flex justify-between py-1.5">
+              <span className="text-gray-600">Status:</span>
+              <span className="font-semibold text-green-600 uppercase text-xs">{bookingDetails.status}</span>
+            </div>
+          </div>
+
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+            <p className="text-xs text-yellow-800">
+              <strong>Important:</strong> Save your booking reference number to check your ticket later.
+            </p>
+          </div>
+
+          {/* Three buttons: Book More, Return to Home, Close */}
+          <div className="space-y-2">
+            <button
+              onClick={handleBookMore}
+              className="w-full bg-green-600 text-white py-2 rounded-lg font-semibold hover:bg-green-700 transition duration-200 flex items-center justify-center gap-2 text-sm"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Book More Flights
+            </button>
+            
+            <div className="flex gap-2">
+              <button
+                onClick={handleReturnHome}
+                className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 flex items-center justify-center gap-1 text-sm"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                Return to Home
+              </button>
+              <button
+                onClick={handleReturnHome}
+                className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-400 transition duration-200 text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
