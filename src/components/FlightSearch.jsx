@@ -3,15 +3,6 @@ import axios from 'axios';
 
 const API_URL = 'http://localhost:5000/api';
 
-// Fallback airports if API fails
-const FALLBACK_AIRPORTS = [
-  { code: 'NYC', name: 'New York', city: 'New York' },
-  { code: 'LAX', name: 'Los Angeles', city: 'Los Angeles' },
-  { code: 'CHI', name: 'Chicago', city: 'Chicago' },
-  { code: 'MIA', name: 'Miami', city: 'Miami' },
-  { code: 'LAS', name: 'Las Vegas', city: 'Las Vegas' },
-];
-
 const FlightSearch = ({ onSearchResults }) => {
   const [searchData, setSearchData] = useState({
     origin: '',
@@ -20,29 +11,85 @@ const FlightSearch = ({ onSearchResults }) => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [airports, setAirports] = useState(FALLBACK_AIRPORTS);
+  const [originSuggestions, setOriginSuggestions] = useState([]);
+  const [destSuggestions, setDestSuggestions] = useState([]);
+  const [showOriginSuggestions, setShowOriginSuggestions] = useState(false);
+  const [showDestSuggestions, setShowDestSuggestions] = useState(false);
+  const [apiStatus, setApiStatus] = useState(null);
 
-  // Load airports from database on component mount
+  // Test API on component mount
   useEffect(() => {
-    const loadAirports = async () => {
+    const testAPI = async () => {
       try {
-        const response = await axios.get(`${API_URL}/flights/airports`);
-        if (response.data && response.data.length > 0) {
-          // Convert to airport format
-          const airportList = response.data.map(city => ({
-            code: city.substring(0, 3).toUpperCase(),
-            name: city,
-            city: city
-          }));
-          setAirports(airportList);
-        }
+        const response = await axios.get(`${API_URL}/flights/test-api`);
+        setApiStatus(response.data.success ? 'connected' : 'error');
+        console.log('API Status:', response.data);
       } catch (err) {
-        console.warn('Could not load airports from API, using fallback');
-        // Keep fallback airports
+        setApiStatus('error');
+        console.error('API Test failed:', err);
       }
     };
-    loadAirports();
+    testAPI();
   }, []);
+
+  // Search airports as user types (triggered after 2 characters)
+  const searchAirports = async (query, type) => {
+    if (query.length < 2) {
+      if (type === 'origin') setOriginSuggestions([]);
+      else setDestSuggestions([]);
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API_URL}/flights/airports/search`, {
+        params: { query: query.toUpperCase() }
+      });
+
+      if (type === 'origin') {
+        setOriginSuggestions(response.data || []);
+      } else {
+        setDestSuggestions(response.data || []);
+      }
+    } catch (err) {
+      console.error('Error searching airports:', err);
+      if (type === 'origin') setOriginSuggestions([]);
+      else setDestSuggestions([]);
+    }
+  };
+
+  const handleOriginChange = (e) => {
+    const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, ''); // Only letters
+    setSearchData({ ...searchData, origin: value });
+    if (value.length >= 2) {
+      searchAirports(value, 'origin');
+      setShowOriginSuggestions(true);
+    } else {
+      setOriginSuggestions([]);
+      setShowOriginSuggestions(false);
+    }
+  };
+
+  const handleDestChange = (e) => {
+    const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, ''); // Only letters
+    setSearchData({ ...searchData, destination: value });
+    if (value.length >= 2) {
+      searchAirports(value, 'dest');
+      setShowDestSuggestions(true);
+    } else {
+      setDestSuggestions([]);
+      setShowDestSuggestions(false);
+    }
+  };
+
+  const selectAirport = (airport, type) => {
+    if (type === 'origin') {
+      setSearchData({ ...searchData, origin: airport.code });
+      setShowOriginSuggestions(false);
+    } else {
+      setSearchData({ ...searchData, destination: airport.code });
+      setShowDestSuggestions(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -52,23 +99,30 @@ const FlightSearch = ({ onSearchResults }) => {
       return;
     }
 
+    if (searchData.origin.length < 3 || searchData.destination.length < 3) {
+      setError('Please enter valid 3-letter airport codes (e.g., DEL, CCU, JFK, LAX)');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
     try {
       const response = await axios.get(`${API_URL}/flights/search`, {
         params: {
-          origin: searchData.origin,
-          destination: searchData.destination,
+          origin: searchData.origin.substring(0, 3).toUpperCase(),
+          destination: searchData.destination.substring(0, 3).toUpperCase(),
           departureDate: searchData.departureDate
         }
       });
       
       if (response.data && response.data.length > 0) {
         onSearchResults(response.data);
+        setError('');
       } else {
         onSearchResults([]);
-        setError('No flights found for the selected criteria. Please try different dates or routes.');
+        setError(`No flights found for ${searchData.origin} to ${searchData.destination} on ${searchData.departureDate}. 
+                  Try different dates or check if the route exists.`);
       }
     } catch (err) {
       const errorMessage = err.response?.data?.error || err.message || 'Failed to search flights';
@@ -82,49 +136,84 @@ const FlightSearch = ({ onSearchResults }) => {
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-      <h2 className="text-2xl font-bold text-gray-800 mb-4">Search Flights</h2>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-2xl font-bold text-gray-800">Search Flights</h2>
+        {apiStatus && (
+          <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
+            apiStatus === 'connected' 
+              ? 'bg-green-100 text-green-700' 
+              : 'bg-red-100 text-red-700'
+          }`}>
+            {apiStatus === 'connected' ? '✓ API Connected' : '✗ API Error'}
+          </div>
+        )}
+      </div>
+      <p className="text-sm text-gray-500 mb-4">
+        Enter 3-letter airport codes (e.g., DEL, CCU, JFK, LAX, LHR). Start typing to see suggestions.
+      </p>
+      
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
+          <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              From <span className="text-red-500">*</span>
+              From (Airport Code) <span className="text-red-500">*</span>
             </label>
-            <select
+            <input
+              type="text"
               value={searchData.origin}
-              onChange={(e) => setSearchData({ ...searchData, origin: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+              onChange={handleOriginChange}
+              onFocus={() => setShowOriginSuggestions(true)}
+              placeholder="e.g., JFK, LAX, LHR"
+              maxLength={3}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
               required
-            >
-              <option value="">Select origin</option>
-              {airports.map((airport) => (
-                <option key={airport.code} value={airport.city}>
-                  {airport.city} {airport.code && `(${airport.code})`}
-                </option>
-              ))}
-            </select>
+            />
+            {showOriginSuggestions && originSuggestions.length > 0 && (
+              <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                {originSuggestions.map((airport, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => selectAirport(airport, 'origin')}
+                    className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100"
+                  >
+                    <div className="font-semibold">{airport.code} - {airport.name}</div>
+                    <div className="text-sm text-gray-500">{airport.city}, {airport.country}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <div>
+          
+          <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              To <span className="text-red-500">*</span>
+              To (Airport Code) <span className="text-red-500">*</span>
             </label>
-            <select
+            <input
+              type="text"
               value={searchData.destination}
-              onChange={(e) => setSearchData({ ...searchData, destination: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+              onChange={handleDestChange}
+              onFocus={() => setShowDestSuggestions(true)}
+              placeholder="e.g., JFK, LAX, LHR"
+              maxLength={3}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
               required
-            >
-              <option value="">Select destination</option>
-              {airports.map((airport) => (
-                <option 
-                  key={airport.code} 
-                  value={airport.city}
-                  disabled={airport.city === searchData.origin}
-                >
-                  {airport.city} {airport.code && `(${airport.code})`}
-                </option>
-              ))}
-            </select>
+            />
+            {showDestSuggestions && destSuggestions.length > 0 && (
+              <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                {destSuggestions.map((airport, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => selectAirport(airport, 'dest')}
+                    className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100"
+                  >
+                    <div className="font-semibold">{airport.code} - {airport.name}</div>
+                    <div className="text-sm text-gray-500">{airport.city}, {airport.country}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+          
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Departure Date <span className="text-red-500">*</span>

@@ -20,8 +20,22 @@ const BookingForm = ({ flight, onBookingSuccess, onClose }) => {
     setError('');
 
     try {
+      // Always send flightData so backend can create flight if needed
       const response = await axios.post(`${API_URL}/bookings`, {
         flightId: flight.id,
+        flightData: {
+          flight_number: flight.flight_number,
+          airline: flight.airline,
+          origin: flight.origin || flight.origin_code,
+          destination: flight.destination || flight.destination_code,
+          origin_code: flight.origin_code,
+          destination_code: flight.destination_code,
+          departure_time: flight.departure_time,
+          arrival_time: flight.arrival_time,
+          price: flight.price,
+          total_seats: flight.total_seats || 180,
+          available_seats: flight.available_seats || 180
+        },
         ...formData
       });
       
@@ -29,6 +43,7 @@ const BookingForm = ({ flight, onBookingSuccess, onClose }) => {
       setBookingDetails(response.data);
       onBookingSuccess();
     } catch (err) {
+      console.error('Booking error:', err);
       setError(err.response?.data?.error || 'Failed to create booking');
     } finally {
       setLoading(false);
